@@ -1,0 +1,184 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nse-dashboard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: api } }
+  template:
+    metadata: { labels: { app: api } }
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/example/nse-dashboard:latest
+          ports: [{ name: http, containerPort: 8000 }]
+          envFrom:
+            - configMapRef: { name: nse-config }
+            - secretRef: { name: nse-secrets }
+          readinessProbe: { httpGet: { path: /health/ready, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /health/live, port: http }, initialDelaySeconds: 10, periodSeconds: 15 }
+          resources:
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: database-migrate
+  annotations: { "argocd.argoproj.io/hook": PreSync }
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: ghcr.io/example/nse-dashboard:latest
+          command: ["python", "scripts/migrate.py"]
+          envFrom: [{ secretRef: { name: nse-secrets } }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels: { app: api }
+spec:
+  selector: { app: api }
+  ports: [{ name: http, port: 8000, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: dashboard } }
+  template:
+    metadata: { labels: { app: dashboard } }
+    spec:
+      containers:
+        - name: dashboard
+          image: ghcr.io/example/nse-dashboard-ui:latest
+          ports: [{ name: http, containerPort: 3000 }]
+          env:
+            - { name: API_ORIGIN, value: "http://api:8000" }
+          readinessProbe: { httpGet: { path: /, port: http }, initialDelaySeconds: 5 }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+spec:
+  selector: { app: dashboard }
+  ports: [{ name: http, port: 3000, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workers
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: workers } }
+  template:
+    metadata: { labels: { app: workers } }
+    spec:
+      containers:
+        - name: ingestion
+          image: ghcr.io/example/nse-dashboard:latest
+          args: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "worker", "--loglevel=INFO", "--queues=ingestion"]
+          envFrom: &env
+            - configMapRef: { name: nse-config }
+            - secretRef: { name: nse-secrets }
+        - name: computation
+          image: ghcr.io/example/nse-dashboard:latest
+          args: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "worker", "--loglevel=INFO", "--queues=computation"]
+          envFrom: *env
+        - name: snapshots
+          image: ghcr.io/example/nse-dashboard:latest
+          args: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "worker", "--loglevel=INFO", "--queues=snapshots"]
+          envFrom: *env
+        - name: alerts
+          image: ghcr.io/example/nse-dashboard:latest
+          args: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "worker", "--loglevel=INFO", "--queues=alerts"]
+          envFrom: *env
+        - name: beat
+          image: ghcr.io/example/nse-dashboard:latest
+          args: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "beat", "--loglevel=INFO"]
+          envFrom: *env
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: api }
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 70 }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nse-dashboard
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+spec:
+  rules:
+    - host: nse.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: api, port: { number: 8000 } } }
+          - path: /health
+            pathType: Prefix
+            backend: { service: { name: api, port: { number: 8000 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: dashboard, port: { number: 3000 } } }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+spec:
+  schedule: "15 1 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: ghcr.io/example/nse-dashboard-postgres-tools:latest
+              envFrom: [{ secretRef: { name: nse-secrets } }]
+              env:
+                - { name: BACKUP_DIR, value: /backups }
+                - { name: BACKUP_RETENTION_DAYS, value: "30" }
+              volumeMounts: [{ name: backups, mountPath: /backups }]
+          volumes:
+            - name: backups
+              persistentVolumeClaim: { claimName: postgres-backups }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-backups
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 20Gi } }

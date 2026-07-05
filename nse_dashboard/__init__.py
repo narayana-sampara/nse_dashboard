@@ -1,0 +1,2 @@
+"""NSE Dashboard application package."""
+

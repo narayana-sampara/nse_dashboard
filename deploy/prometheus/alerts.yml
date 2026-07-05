@@ -1,0 +1,21 @@
+groups:
+  - name: nse-dashboard-slos
+    rules:
+      - alert: NseApiHighErrorRate
+        expr: sum(rate(nse_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(nse_http_requests_total[5m])), 0.001) > 0.01
+        for: 10m
+        labels: { severity: page }
+        annotations:
+          summary: NSE API error budget is burning
+      - alert: NseApiHighLatency
+        expr: histogram_quantile(0.95, sum by (le) (rate(nse_http_request_duration_seconds_bucket[5m]))) > 1
+        for: 15m
+        labels: { severity: ticket }
+        annotations:
+          summary: NSE API p95 latency exceeds one second
+      - alert: NseApiDown
+        expr: up{job="nse-dashboard-api"} == 0
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: NSE API is unavailable

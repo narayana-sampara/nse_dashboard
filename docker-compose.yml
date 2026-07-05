@@ -1,0 +1,158 @@
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB: nse_dashboard
+      POSTGRES_USER: nse
+      POSTGRES_PASSWORD: nse-local
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nse -d nse_dashboard"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build: .
+    command: ["python", "scripts/migrate.py"]
+    environment:
+      DATABASE_URL: postgresql://nse:nse-local@postgres:5432/nse_dashboard
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    environment:
+      APP_ENV: development
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      DATABASE_URL: postgresql://nse:nse-local@postgres:5432/nse_dashboard
+      WEBSOCKET_TOKENS: ${WEBSOCKET_TOKENS:-local-development-token}
+      PREDICTION_GENERATE_TIMEOUT_SECONDS: ${PREDICTION_GENERATE_TIMEOUT_SECONDS:-25}
+      METRICS_ENABLED: "1"
+      OTEL_SERVICE_NAME: nse-dashboard-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      JWT_SECRET: ${JWT_SECRET:-dev-insecure-secret-change-me}
+      ADMIN_BOOTSTRAP_USERNAME: ${ADMIN_BOOTSTRAP_USERNAME:-admin}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis: 
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  dashboard:
+    build:
+      context: ./dashboard-ui
+      args:
+        API_ORIGIN: http://api:8000
+        NEXT_PUBLIC_API_ORIGIN: ${NEXT_PUBLIC_API_ORIGIN:-http://localhost:8000}
+        NEXT_PUBLIC_WEBSOCKET_TOKEN: ${WEBSOCKET_TOKENS:-local-development-token}
+    environment:
+      API_ORIGIN: http://api:8000
+      NEXT_PUBLIC_API_ORIGIN: ${NEXT_PUBLIC_API_ORIGIN:-http://localhost:8000}
+      NEXT_PUBLIC_WEBSOCKET_TOKEN: ${WEBSOCKET_TOKENS:-local-development-token}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    volumes:
+      - ./deploy/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.66.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+
+  backup:
+    image: postgres:16-alpine
+    profiles: ["operations"]
+    environment:
+      DATABASE_URL: postgresql://nse:nse-local@postgres:5432/nse_dashboard
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+    volumes:
+      - ./scripts/backup-postgres.sh:/usr/local/bin/backup-postgres:ro
+      - postgres_backups:/backups
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup-postgres"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker-ingestion:
+    build: .
+    command: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "worker", "--loglevel=INFO", "--queues=ingestion", "--hostname=ingestion@%h"]
+    environment: &worker-environment
+      APP_ENV: development
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql://nse:nse-local@postgres:5432/nse_dashboard
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      PREDICTION_GENERATE_TIMEOUT_SECONDS: ${PREDICTION_GENERATE_TIMEOUT_SECONDS:-25}
+    depends_on: &worker-dependencies
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker-computation:
+    build: .
+    command: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "worker", "--loglevel=INFO", "--queues=computation", "--hostname=computation@%h"]
+    environment: *worker-environment
+    depends_on: *worker-dependencies
+
+  worker-snapshots:
+    build: .
+    command: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "worker", "--loglevel=INFO", "--queues=snapshots", "--hostname=snapshots@%h"]
+    environment: *worker-environment
+    depends_on: *worker-dependencies
+
+  worker-alerts:
+    build: .
+    command: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "worker", "--loglevel=INFO", "--queues=alerts", "--hostname=alerts@%h"]
+    environment: *worker-environment
+    depends_on: *worker-dependencies
+
+  beat:
+    build: .
+    command: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "beat", "--loglevel=INFO"]
+    environment: *worker-environment
+    depends_on: *worker-dependencies
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  postgres_backups:

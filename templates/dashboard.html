@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Daily NSE technical signal screener powered by Yahoo Finance data">
+  <title>NSE Signal Desk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', path='dashboard.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="NSE Signal Desk home">
+      <span class="brand-mark">N</span>
+      <span>NSE <strong>Signal Desk</strong></span>
+    </a>
+    <div class="market-status"><span class="pulse"></span> Yahoo daily data</div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">DAILY TECHNICAL SCREEN</p>
+        <h1>Sector signals, ranked<br><span>with context.</span></h1>
+        <p class="hero-copy">Five strongest buy and sell setups per sector, scored across trend, momentum, RSI, MACD, Bollinger position, and volume.</p>
+      </div>
+      <div class="hero-actions">
+        <button id="refresh-button" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M6.1 9A7 7 0 0 1 18 6l2 2M17.9 15A7 7 0 0 1 6 18l-2-2"/></svg>
+          Refresh signals
+        </button>
+        <span id="updated-at">Waiting for market data</span>
+      </div>
+    </section>
+
+    <section class="summary" aria-label="Screen summary">
+      <div><span>Market date</span><strong id="market-date">—</strong></div>
+      <div><span>Stocks scored</span><strong id="stocks-scored">—</strong></div>
+      <div><span>Sectors</span><strong id="sector-count">—</strong></div>
+      <div><span>Model</span><strong>Composite v1</strong></div>
+    </section>
+
+    <section class="toolbar">
+      <div class="tabs" role="tablist" aria-label="Signal type">
+        <button class="tab active" role="tab" aria-selected="true" data-signal="buys">Buy signals</button>
+        <button class="tab" role="tab" aria-selected="false" data-signal="sells">Sell signals</button>
+      </div>
+      <label class="sector-filter">Sector
+        <select id="sector-filter"><option value="all">All sectors</option></select>
+      </label>
+    </section>
+
+    <div id="loading" class="loading" role="status">
+      <span class="loader"></span>
+      <strong>Scanning the NSE universe</strong>
+      <small>Yahoo Finance may take a few seconds to return daily history.</small>
+    </div>
+    <div id="error" class="error-panel" hidden></div>
+    <section id="sector-grid" class="sector-grid" aria-live="polite"></section>
+
+    <aside class="methodology">
+      <div>
+        <p class="eyebrow">HOW THE SCORE WORKS</p>
+        <h2>Six signals. One readable rank.</h2>
+      </div>
+      <div class="formula">
+        <span><b>30%</b> EMA trend</span>
+        <span><b>20%</b> MACD</span>
+        <span><b>20%</b> RSI regime</span>
+        <span><b>20%</b> 20-day momentum</span>
+        <span><b>10%</b> Bands + volume</span>
+      </div>
+      <p>Scores ≥ +25 are BUY candidates; scores ≤ −25 are SELL candidates. Rankings are a technical screen, not personalized investment advice. Confirm liquidity, fundamentals, risk, and market conditions independently.</p>
+    </aside>
+  </main>
+
+  <footer>Data supplied by Yahoo Finance · Prices may be delayed · For research and education only</footer>
+  <script src="{{ url_for('static', path='dashboard.js') }}"></script>
+</body>
+</html>
