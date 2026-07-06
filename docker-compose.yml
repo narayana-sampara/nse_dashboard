@@ -37,10 +37,26 @@ services:
         condition: service_healthy
     restart: "no"
 
+  seed-users:
+    build: .
+    command: ["python", "scripts/seed_users.py"]
+    environment:
+      DATABASE_URL: postgresql://nse:nse-local@postgres:5432/nse_dashboard
+      ADMIN_BOOTSTRAP_USERNAME: ${ADMIN_BOOTSTRAP_USERNAME:-admin}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:?ADMIN_BOOTSTRAP_PASSWORD must be set}
+      SEED_USER1_USERNAME: ${SEED_USER1_USERNAME:?SEED_USER1_USERNAME must be set}
+      SEED_USER1_PASSWORD: ${SEED_USER1_PASSWORD:?SEED_USER1_PASSWORD must be set}
+      SEED_USER2_USERNAME: ${SEED_USER2_USERNAME:?SEED_USER2_USERNAME must be set}
+      SEED_USER2_PASSWORD: ${SEED_USER2_PASSWORD:?SEED_USER2_PASSWORD must be set}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
   api:
     build: .
     environment:
-      APP_ENV: development
+      APP_ENV: production
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -52,13 +68,13 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
       JWT_SECRET: ${JWT_SECRET:-dev-insecure-secret-change-me}
       ADMIN_BOOTSTRAP_USERNAME: ${ADMIN_BOOTSTRAP_USERNAME:-admin}
-      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-admin}
     ports:
       - "8000:8000"
     depends_on:
-      redis: 
+      redis:
         condition: service_healthy
-      migrate:
+      seed-users:
         condition: service_completed_successfully
 
   dashboard:
