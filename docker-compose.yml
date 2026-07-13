@@ -127,9 +127,9 @@ services:
       postgres:
         condition: service_healthy
 
-  worker-ingestion:
+  worker:
     build: .
-    command: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "worker", "--loglevel=INFO", "--queues=ingestion", "--hostname=ingestion@%h"]
+    command: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "worker", "--loglevel=INFO", "--queues=ingestion,computation,snapshots,alerts", "--concurrency=4", "--hostname=worker@%h"]
     environment: &worker-environment
       APP_ENV: development
       REDIS_URL: redis://redis:6379/0
@@ -142,24 +142,6 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-
-  worker-computation:
-    build: .
-    command: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "worker", "--loglevel=INFO", "--queues=computation", "--hostname=computation@%h"]
-    environment: *worker-environment
-    depends_on: *worker-dependencies
-
-  worker-snapshots:
-    build: .
-    command: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "worker", "--loglevel=INFO", "--queues=snapshots", "--hostname=snapshots@%h"]
-    environment: *worker-environment
-    depends_on: *worker-dependencies
-
-  worker-alerts:
-    build: .
-    command: ["celery", "-A", "nse_dashboard.workers.celery_app:app", "worker", "--loglevel=INFO", "--queues=alerts", "--hostname=alerts@%h"]
-    environment: *worker-environment
-    depends_on: *worker-dependencies
 
   beat:
     build: .

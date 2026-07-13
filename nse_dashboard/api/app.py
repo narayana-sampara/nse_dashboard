@@ -33,6 +33,7 @@ from nse_dashboard.options.smart_money import SMART_MONEY_WEIGHTS, rank_smart_mo
 from nse_dashboard.api.deps import require_menu
 from nse_dashboard.api.routes.admin import create_router as create_admin_router
 from nse_dashboard.api.routes.auth import create_router as create_auth_router
+from nse_dashboard.api.routes.bookmarks import create_router as create_bookmarks_router
 from nse_dashboard.api.routes.ml_predictions import create_router as create_ml_predictions_router
 from nse_dashboard.five_percent_strategy.routes import create_router as create_five_percent_strategy_router
 from nse_dashboard.five_percent_strategy.service import FivePercentStrategyService
@@ -45,6 +46,7 @@ from nse_dashboard.services.alpha_ranking import AlphaRankingService
 from nse_dashboard.services.stock_analysis import SingleStockAnalysisService
 from nse_dashboard.services.growth_radar import GrowthRadarService
 from nse_dashboard.services.quotes import StockQuoteService
+from nse_dashboard.services.bookmarks import BookmarkService
 from nse_dashboard.streaming.broker import (
     STREAM_CHANNELS,
     EventBroker,
@@ -172,6 +174,9 @@ def create_app(
     if auth_repo is not None:
         app.include_router(create_auth_router(settings, auth_repo))
         app.include_router(create_admin_router(auth_repo))
+        bookmark_service = BookmarkService(service.snapshots, quote_service)
+        app.state.bookmark_service = bookmark_service
+        app.include_router(create_bookmarks_router(bookmark_service))
 
     if settings.cors_origins:
         app.add_middleware(

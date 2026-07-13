@@ -1346,6 +1346,43 @@ class PostgresSnapshotRepository:
             row = cursor.fetchone()
         return dict(row) if row else None
 
+    def save_bookmark(self, user_id: int, symbol: str, price: float) -> dict[str, Any]:
+        from psycopg.rows import dict_row
+
+        with self._connect() as connection, connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                """
+                INSERT INTO stock_bookmarks (user_id, symbol, bookmark_price, created_at)
+                VALUES (%s, %s, %s, now())
+                ON CONFLICT (user_id, symbol)
+                DO UPDATE SET bookmark_price = EXCLUDED.bookmark_price, created_at = now()
+                RETURNING *
+                """,
+                (user_id, symbol, price),
+            )
+            row = cursor.fetchone()
+        return dict(row)
+
+    def list_bookmarks(self, user_id: int) -> list[dict[str, Any]]:
+        from psycopg.rows import dict_row
+
+        with self._connect() as connection, connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                "SELECT * FROM stock_bookmarks WHERE user_id = %s ORDER BY created_at DESC",
+                (user_id,),
+            )
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_bookmark(self, user_id: int, symbol: str) -> bool:
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM stock_bookmarks WHERE user_id = %s AND symbol = %s",
+                (user_id, symbol),
+            )
+            deleted = cursor.rowcount > 0
+        return deleted
+
     def close(self) -> None:
         # Connections are intentionally short-lived until pooling is introduced.
         return None

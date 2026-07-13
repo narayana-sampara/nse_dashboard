@@ -8,7 +8,6 @@ const MENU_ITEMS: { key: MenuKey; label: string }[] = [
   { key: "signals", label: "Signals" },
   { key: "weekly", label: "Weekly Predictions" },
   { key: "monthly", label: "Monthly Predictions" },
-  { key: "radar", label: "Early Growth Radar" },
   { key: "future", label: "Future Stocks" },
   { key: "analysis", label: "Deep Dive" },
   { key: "five_percent_strategy", label: "AI 5% Growth Strategy" },

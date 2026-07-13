@@ -94,6 +94,12 @@ class SnapshotRepository(Protocol):
         self, trade_id: int, update: dict[str, Any]
     ) -> dict[str, Any] | None: ...
 
+    def save_bookmark(self, user_id: int, symbol: str, price: float) -> dict[str, Any]: ...
+
+    def list_bookmarks(self, user_id: int) -> list[dict[str, Any]]: ...
+
+    def delete_bookmark(self, user_id: int, symbol: str) -> bool: ...
+
     def ping(self) -> bool: ...
 
     def close(self) -> None: ...
@@ -318,6 +324,36 @@ class NullSnapshotRepository:
             return None
         record.update(update)
         return record
+
+    def save_bookmark(self, user_id: int, symbol: str, price: float) -> dict[str, Any]:
+        from datetime import datetime, timezone
+
+        bookmarks = getattr(self, "_bookmarks", {})
+        key = (user_id, symbol)
+        next_id = getattr(self, "_bookmark_seq", 0) + 1
+        self._bookmark_seq = next_id
+        record = {
+            "id": bookmarks.get(key, {}).get("id", next_id),
+            "user_id": user_id,
+            "symbol": symbol,
+            "bookmark_price": price,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        bookmarks[key] = record
+        self._bookmarks = bookmarks
+        return record
+
+    def list_bookmarks(self, user_id: int) -> list[dict[str, Any]]:
+        matches = [
+            record
+            for (uid, _symbol), record in getattr(self, "_bookmarks", {}).items()
+            if uid == user_id
+        ]
+        return sorted(matches, key=lambda item: item["created_at"], reverse=True)
+
+    def delete_bookmark(self, user_id: int, symbol: str) -> bool:
+        bookmarks = getattr(self, "_bookmarks", {})
+        return bookmarks.pop((user_id, symbol), None) is not None
 
     def ping(self) -> bool:
         return True

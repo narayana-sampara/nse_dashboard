@@ -10,7 +10,6 @@ const MENU_ITEMS: { key: Exclude<MenuKey, "five_percent_strategy">; label: strin
   { key: "signals", label: "Signals" },
   { key: "weekly", label: "Weekly Predictions" },
   { key: "monthly", label: "Monthly Predictions" },
-  { key: "radar", label: "Early Growth Radar" },
   { key: "future", label: "Future Stocks" },
   { key: "analysis", label: "Deep Dive" },
 ];
@@ -199,6 +198,35 @@ export default function Home() {
   const [pricesLoading, setPricesLoading] = useState(false);
   const [pricesFetchedAt, setPricesFetchedAt] = useState<string | null>(null);
   const [pricesError, setPricesError] = useState("");
+  const [bookmarkedSymbols, setBookmarkedSymbols] = useState<Set<string>>(new Set());
+
+  const loadBookmarks = useCallback(async () => {
+    try {
+      const response = await apiFetch("/api/v1/bookmarks", { cache: "no-store" });
+      if (!response.ok) return;
+      const payload = await response.json() as { symbol: string }[];
+      setBookmarkedSymbols(new Set(payload.map((item) => item.symbol)));
+    } catch { /* non-fatal */ }
+  }, []);
+
+  const toggleBookmark = useCallback(async (symbol: string) => {
+    const isBookmarked = bookmarkedSymbols.has(symbol);
+    setBookmarkedSymbols((prev) => {
+      const next = new Set(prev);
+      if (isBookmarked) next.delete(symbol); else next.add(symbol);
+      return next;
+    });
+    try {
+      const response = await apiFetch(`/api/v1/bookmarks/${symbol}`, { method: isBookmarked ? "DELETE" : "POST" });
+      if (!response.ok) throw new Error(`Bookmark API returned ${response.status}`);
+    } catch {
+      setBookmarkedSymbols((prev) => {
+        const next = new Set(prev);
+        if (isBookmarked) next.add(symbol); else next.delete(symbol);
+        return next;
+      });
+    }
+  }, [bookmarkedSymbols]);
 
   const loadSignals = useCallback(async (refresh = false) => {
     setLoading(true); setError(""); setOperationStatus("");
@@ -364,6 +392,7 @@ export default function Home() {
   }, [authChecked, allowedMenus, view]);
   const authReady = authChecked && !!currentUser;
   useEffect(() => { if (authReady) void loadSignals(); }, [authReady, loadSignals]);
+  useEffect(() => { if (authReady) void loadBookmarks(); }, [authReady, loadBookmarks]);
   useEffect(() => { if (authReady && view === "weekly" && weekly === null) void loadWeekly(); }, [authReady, view, weekly, loadWeekly]);
   useEffect(() => { if (authReady && view === "monthly") void loadMonthly(months); }, [authReady, view, months, loadMonthly]);
   useEffect(() => { if (authReady && view === "radar" && growthRadar === null) void loadGrowthRadar(); }, [authReady, view, growthRadar, loadGrowthRadar]);
@@ -455,6 +484,7 @@ export default function Home() {
           {(currentUser?.role === "admin" || currentUser?.permissions.includes("five_percent_strategy")) && (
             <Link href="/ai-five-percent-strategy" className="menu-link">AI 5% Growth Strategy</Link>
           )}
+          <Link href="/bookmarks" className="menu-link">My Bookmarks</Link>
         </nav>
         <span className={`status ${stream}`}>Alerts {stream}</span>
         {currentUser?.role === "admin" && <a className="admin-link" href="/admin">Admin</a>}
@@ -468,7 +498,7 @@ export default function Home() {
         <section className="stats"><div><span>Market regime</span><b>{dashboard?.regime?.state ?? "UNAVAILABLE"}</b></div><div><span>Paper equity</span><b>{portfolio ? `₹${portfolio.summary.equity.toLocaleString("en-IN")}` : "—"}</b></div><div><span>Drawdown</span><b>{portfolio ? `${portfolio.summary.drawdown_pct}%` : "—"}</b></div><div><span>Open positions</span><b>{portfolio?.summary.open_positions ?? 0}</b></div></section>
         <div className="workspace"><section><div className="controls"><div><button className={side === "buys" ? "active" : ""} onClick={() => setSide("buys")}>Buy signals</button><button className={side === "sells" ? "active" : ""} onClick={() => setSide("sells")}>Sell signals</button></div><select aria-label="Sector" value={sector} onChange={(event) => setSector(event.target.value)}><option value="all">All sectors</option>{dashboard?.sectors.map((item) => <option key={item.name}>{item.name}</option>)}</select></div>
           {loading && <div className="empty">Scanning market data…</div>}
-          <div className="sector-grid">{sectors.map((item) => <section className="card" key={item.name}><h2>{item.name}<small>{item.scanned} screened</small></h2>{item[side].length ? item[side].map((stock) => <div className="stock" key={stock.symbol}><div><b>{stock.name}</b><small>{stock.symbol}</small></div><span>₹{stock.price.toLocaleString("en-IN")}</span><span className={stock.change_pct >= 0 ? "positive" : "negative"}>{stock.change_pct > 0 ? "+" : ""}{stock.change_pct}%</span><mark className={side}>{stock.score > 0 ? "+" : ""}{stock.score}</mark></div>) : <div className="empty">No qualifying signals</div>}</section>)}</div></section>
+          <div className="sector-grid">{sectors.map((item) => <section className="card" key={item.name}><h2>{item.name}<small>{item.scanned} screened</small></h2>{item[side].length ? item[side].map((stock) => <div className="stock" key={stock.symbol}><div><b>{stock.name}</b><small>{stock.symbol}</small></div><span>₹{stock.price.toLocaleString("en-IN")}</span><span className={stock.change_pct >= 0 ? "positive" : "negative"}>{stock.change_pct > 0 ? "+" : ""}{stock.change_pct}%</span><mark className={side}>{stock.score > 0 ? "+" : ""}{stock.score}</mark><button className={`follow-button${bookmarkedSymbols.has(stock.symbol) ? " following" : ""}`} onClick={() => void toggleBookmark(stock.symbol)}>{bookmarkedSymbols.has(stock.symbol) ? "★ Following" : "☆ Follow"}</button></div>) : <div className="empty">No qualifying signals</div>}</section>)}</div></section>
           <aside className="alerts"><h2>Alert center <small>Latest 50</small></h2>{alerts.length ? alerts.map((alert, index) => <article key={`${alert.symbol}-${alert.created_at}-${index}`}><span className={`alert-side ${alert.signal.toLowerCase()}`}>{alert.signal}</span><div><b>{alert.symbol}</b><small>{alert.sector ?? "Unclassified"} · {new Date(alert.created_at).toLocaleTimeString("en-IN")}</small></div><strong>{alert.score > 0 ? "+" : ""}{alert.score}</strong></article>) : <div className="empty">No persisted alerts yet</div>}</aside></div>
       </> : view === "weekly" ? <>
         <section className="hero weekly-hero"><div><p className="eyebrow">COMPLETED WEEKLY CANDLE SCREEN</p><h1>Weekly buy and sell<br /><em>crossover indicators.</em></h1><p className="hero-copy">Exact MACD, EMA and ADX conditions, ranked up to five per Nifty 500 industry.</p></div><button onClick={() => void loadWeekly(true)} disabled={loading}>{loading ? "Generating…" : "Generate indicators"}</button></section>
